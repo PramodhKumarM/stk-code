@@ -234,7 +234,6 @@
 #include "race/race_manager.hpp"
 #include "replay/replay_play.hpp"
 #include "replay/replay_recorder.hpp"
-#include "states_screens/download_assets.hpp"
 #include "states_screens/main_menu_screen.hpp"
 #include "states_screens/online/networking_lobby.hpp"
 #include "states_screens/online/register_screen.hpp"
@@ -612,6 +611,9 @@ void cmdLineHelp()
     "       --server-password= Sets a password for a server (both client&server).\n"
     "       --connect-now=ip   Connect to a server with IP known now\n"
     "                          (in format x.x.x.x:xxx(port)), the port should be its\n"
+    "                          public port.\n"
+    "       --connect-now6=ip   Connect to a server with IPv6 known now\n"
+    "                          (in format [x:x:x:x:x:x:x:x]:xxx(port)), the port should be its\n"
     "                          public port.\n"
     "       --server-id=n      Server id in stk addons for --connect-now.\n"
     "       --network-ai=n     Numbers of AI for connecting to linear race server, used\n"
@@ -1324,7 +1326,11 @@ int handleCmdLine(bool has_server_config, bool has_parent_process)
         }
     }
 
-    if (CommandLine::has("--connect-now", &s))
+    std::string ipv4;
+    std::string ipv6;
+    bool has_ipv4 = CommandLine::has("--connect-now", &ipv4);
+    bool has_ipv6 = CommandLine::has("--connect-now6", &ipv6);
+    if (has_ipv4 || has_ipv6)
     {
         NetworkConfig::get()->setIsServer(false);
         if (CommandLine::has("--network-ai", &n))
@@ -1344,10 +1350,26 @@ int handleCmdLine(bool has_server_config, bool has_parent_process)
                 input_manager->getDeviceManager()->getLatestUsedDevice(),
                 PlayerManager::getCurrentPlayer(), PLAYER_DIFFICULTY_NORMAL);
         }
-        TransportAddress server_addr(s);
+        std::string fixed_ipv6 = StringUtils::findAndReplace(ipv6, "[", " ");
+        fixed_ipv6 = StringUtils::findAndReplace(fixed_ipv6, "]", " ");
+        auto split_ipv6 = StringUtils::split(fixed_ipv6, ' ');
+        std::string ipv6_port;
+        if (split_ipv6.size() == 3)
+        {
+            ipv4 = "0.0.0.1" + split_ipv6[2];
+            fixed_ipv6 = split_ipv6[1];
+        }
+        else
+            fixed_ipv6.clear();
+        TransportAddress server_addr(ipv4);
         auto server = std::make_shared<Server>(0,
             StringUtils::utf8ToWide(server_addr.toString()), 0, 0, 0, 0,
             server_addr, !server_password.empty(), false);
+        if (!fixed_ipv6.empty())
+        {
+            server->setIPV6Address(fixed_ipv6);
+            server->setIPV6Connection(true);
+        }
         NetworkConfig::get()->doneAddingNetworkPlayers();
         if (server_id != 0)
         {
@@ -1679,6 +1701,8 @@ void clearGlobalVariables()
 #ifdef ENABLE_WIIUSE
     wiimote_manager = NULL;
 #endif
+    World::setWorld(NULL);
+    GUIEngine::resetGlobalVariables();
 }   // clearGlobalVariables
 
 //=============================================================================
@@ -1707,37 +1731,18 @@ void initRest()
         exit(0);
     }
 
+    // We need a temporary skin to load the font list from skin (if any)
+    GUIEngine::Skin* tmp_skin = new GUIEngine::Skin(NULL);
+    GUIEngine::setSkin(tmp_skin);
     font_manager = new FontManager();
     font_manager->loadFonts();
+    delete tmp_skin;
+    GUIEngine::setSkin(NULL);
+
     GUIEngine::init(device, driver, StateManager::get());
     input_manager = new InputManager();
     // Get into menu mode initially.
     input_manager->setMode(InputManager::MENU);
-#ifdef MOBILE_STK
-    if (DownloadAssets::getInstance()->needDownloadAssets())
-    {
-        // The screen tell user it will use wifi / cellular data to download already
-        int prev_state = UserConfigParams::m_internet_status;
-        UserConfigParams::m_internet_status = Online::RequestManager::IPERM_ALLOWED;
-        DownloadAssets::getInstance()->push();
-        main_loop = new MainLoop(0, true/*download_assets*/);
-        main_loop->run();
-        delete main_loop;
-        main_loop = NULL;
-        // Reset after finish download
-        UserConfigParams::m_internet_status = prev_state;
-        if (DownloadAssets::getInstance()->needDownloadAssets())
-            throw std::runtime_error("User doesn't want to download assets");
-        else
-        {
-            // Clean the download assets screen after downloading
-            GUIEngine::clear();
-            GUIEngine::cleanUp();
-            GUIEngine::clearScreenCache();
-            GUIEngine::init(device, driver, StateManager::get());
-        }
-    }
-#endif
 
     stk_config->initMusicFiles();
     // This only initialises the non-network part of the add-ons manager. The

@@ -22,11 +22,12 @@ option(SERVER_ONLY "Create a server only (i.e. no graphics or sound)" OFF)
 option(CHECK_ASSETS "Check if assets are installed in ../stk-assets" ON)
 option(USE_SYSTEM_ANGELSCRIPT "Use system angelscript instead of built-in angelscript. If you enable this option, make sure to use a compatible version." OFF)
 option(USE_SYSTEM_ENET "Use system ENet instead of the built-in version, when available." ON)
+option(USE_IPV6 "Allow create or connect to game server with IPv6 address, system enet will not be used." ON)
 option(USE_SYSTEM_GLEW "Use system GLEW instead of the built-in version, when available." ON)
 option(USE_SYSTEM_WIIUSE "Use system WiiUse instead of the built-in version, when available." OFF)
 option(USE_SQLITE3 "Use sqlite to manage server stats and ban list." ON)
 
-option(USE_CRYPTO_OPENSSL "Use OpenSSL instead of Nettle for cryptography in STK." OFF)
+option(USE_CRYPTO_OPENSSL "Use OpenSSL instead of Nettle for cryptography in STK." ON)
 CMAKE_DEPENDENT_OPTION(BUILD_RECORDER "Build opengl recorder" ON
     "NOT SERVER_ONLY;NOT APPLE" OFF)
 CMAKE_DEPENDENT_OPTION(USE_SYSTEM_SQUISH "Use system Squish library instead of the built-in version, when available." ON
@@ -48,6 +49,7 @@ if (IOS)
     ADD_DEFINITIONS(-DIOS_STK)
     set(CMAKE_XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2")
     option(USE_GLES2 "Use OpenGL ES2 renderer" ON)
+    find_library(RESOLV_LIBRARY NAMES resolv libresolv)
 endif()
 
 if((UNIX AND NOT APPLE) AND NOT SERVER_ONLY)
@@ -159,11 +161,15 @@ add_subdirectory("${PROJECT_SOURCE_DIR}/lib/bullet")
 include_directories("${PROJECT_SOURCE_DIR}/lib/bullet/src")
 
 # Find system ENet library or build it if missing
-if((UNIX AND NOT APPLE) AND USE_SYSTEM_ENET)
+if((UNIX AND NOT APPLE) AND USE_SYSTEM_ENET AND NOT USE_IPV6)
     pkg_check_modules(ENET libenet>=1.3.4)
 endif()
 
-if(ENET_FOUND)
+if (USE_IPV6)
+   add_definitions(-DENABLE_IPV6)
+endif()
+
+if(ENET_FOUND AND NOT USE_IPV6)
     include_directories(${ENET_INCLUDE_DIRS})
 else()
     # Fallback to built-in version
@@ -507,6 +513,21 @@ else()
     target_link_libraries(supertuxkart ${PTHREAD_LIBRARY})
 endif()
 
+# check if linking against libatomic is required
+include(CheckCXXSourceCompiles)
+check_cxx_source_compiles("
+#include <atomic>
+#include <cstdint>
+int main() {
+  std::atomic<uint64_t> x{0};
+  x.load();
+  return 0;
+}
+" NO_LIBATOMIC_NEEDED)
+if (NOT NO_LIBATOMIC_NEEDED)
+    target_link_libraries(supertuxkart atomic)
+endif()
+
 # CURL and OpenSSL or Nettle
 # 1.0.1d for compatible AES GCM handling
 SET(OPENSSL_MINIMUM_VERSION "1.0.1d")
@@ -577,7 +598,7 @@ if(NOT SERVER_ONLY)
                                             -framework UIKit
                                             -framework CoreMotion
                                             -framework Foundation
-                                            -framework GLKit")
+                                            -framework GLKit ${RESOLV_LIBRARY}")
     else()
         target_link_libraries(supertuxkart GLESv2)
     endif()

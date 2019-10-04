@@ -1549,15 +1549,10 @@ KartTeam World::getKartTeam(unsigned int kart_id) const
 //-----------------------------------------------------------------------------
 void World::setAITeam()
 {
-    const int total_players = race_manager->getNumPlayers();
-    const int total_karts = race_manager->getNumberOfKarts();
-
-    // No AI
-    if ((total_karts - total_players) == 0) return;
-
-    int red_players = 0;
-    int blue_players = 0;
-    for (int i = 0; i < total_players; i++)
+    m_red_ai  = race_manager->getNumberOfRedAIKarts();
+    m_blue_ai = race_manager->getNumberOfBlueAIKarts();
+    
+    for (int i = 0; i < (int)race_manager->getNumLocalPlayers(); i++)
     {
         KartTeam team = race_manager->getKartInfo(i).getKartTeam();
 
@@ -1568,18 +1563,7 @@ void World::setAITeam()
             team = KART_TEAM_BLUE;
             continue; //FIXME, this is illogical
         }
-
-        team == KART_TEAM_BLUE ? blue_players++ : red_players++;
     }
-
-    int available_ai = total_karts - red_players - blue_players;
-    int additional_blue = red_players - blue_players;
-
-    m_blue_ai = (available_ai - additional_blue) / 2 + additional_blue;
-    m_red_ai  = (available_ai - additional_blue) / 2;
-
-    if ((available_ai + additional_blue)%2 == 1)
-        (additional_blue < 0) ? m_red_ai++ : m_blue_ai++;
 
     Log::debug("World", "Blue AI: %d red AI: %d", m_blue_ai, m_red_ai);
 
